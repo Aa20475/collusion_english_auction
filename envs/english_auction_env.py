@@ -24,7 +24,6 @@ class EnglishAuctionEnv(gym.Env):
 
     def __init__(
         self,
-        size: int = 5,
         num_agents: int = 2,
         render_mode: str = None,
         bid_increments: int = 1,
@@ -36,7 +35,6 @@ class EnglishAuctionEnv(gym.Env):
         Initializes an instance of the EnglishAuctionEnv class.
 
         Args:
-            size (int): The size of the environment grid. Defaults to 5.
             num_agents (int): The number of agents participating in the auction. Defaults to 2.
             render_mode (str): The rendering mode for visualization. Defaults to None.
             bid_increments (int): The increment value for each bid. Defaults to 1.
@@ -47,8 +45,6 @@ class EnglishAuctionEnv(gym.Env):
         Currently all the values are initialized randomly
         """
         super().__init__()
-
-        self.size = size
 
         # auction parameters
         self.num_agents = num_agents
@@ -81,6 +77,9 @@ class EnglishAuctionEnv(gym.Env):
         # Action space will be a vector of size num_agents with each element representing the action of an agent
         self.action_space = spaces.MultiDiscrete([2] * self.num_agents)
         self.render_mode = render_mode
+
+        # rewards buffer that is updated at each step
+        self.rewards = np.zeros(self.num_agents)
 
     def __get_observation(self):
         """
@@ -129,6 +128,7 @@ class EnglishAuctionEnv(gym.Env):
         # action is a vector of size num_agents with each element representing the action of an agent
         # 0 - pass, 1 - bid
         terminated = False
+        self.rewards = np.zeros(self.num_agents)
         
         bid = False
         # if even a single agent bids, the current bid is incremented by bid_increment
@@ -149,6 +149,12 @@ class EnglishAuctionEnv(gym.Env):
             if self.current_object.current_bidder_id is not None:
                 self.current_object.sold = True
                 self.agent_spending[self.current_object.current_bidder_id] += self.current_object.current_bid
+                # here rewards are only an indication of winning. We will have a reward transformation in the agent class to make it more meaningful
+                self.rewards[self.current_object.current_bidder_id] = 1
+                # indicate that other agents did not win
+                for i in range(self.num_agents):
+                    if i != self.current_object.current_bidder_id:
+                        self.rewards[i] = -1
             self.no_bid_counter = 0
             # move to the next object
             if self.current_object.id == self.num_objects - 1:
@@ -157,9 +163,4 @@ class EnglishAuctionEnv(gym.Env):
             else:
                 self.current_object = self.objects[(self.current_object.id + 1) % self.num_objects]
         
-        return self.__get_observation(), self.__compute_reward(action), terminated, False, self.__get_info()
-    
-    def __compute_reward(self, action):
-        # reward will be a vector of size num_agents with each element representing the reward of an agent
-        # returning 0 for now
-        return np.zeros(self.num_agents)
+        return self.__get_observation(), self.rewards, terminated, False, self.__get_info()
