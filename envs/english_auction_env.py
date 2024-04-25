@@ -17,10 +17,38 @@ class EnglishAuctionEnv(gym.Env):
         def __init__(self, id : int) -> None:
             self.id = id
             self.stats = np.random.rand(3)
-            self.current_bid = None
+            self.current_bid = 0
             self.current_bidder_id = None
             self.sold = False
 
+        def reset(self):
+            self.current_bid = 0
+            self.current_bidder_id = None
+            self.sold = False
+            self.stats = np.random.rand(3)
+
+    class Bidder:
+        """
+        Represents a bidder in an English auction.
+
+        Attributes:
+            budget (int): The budget of the bidder.
+            spending (int): The spending of the bidder.
+        """
+        def __init__(self, id : int, budget: int) -> None:
+            self.id = id
+            self.budget = budget
+            self.spending = 0
+            self.won_objects = []
+            self.value_won_so_far = 0
+            # weights for the stats of the object
+            self.prefs = np.random.rand(3)
+
+        def reset(self):
+            self.spending = 0
+            self.won_objects = []
+            self.value_won_so_far = 0
+            self.prefs = np.random.rand(3)
 
     def __init__(
         self,
@@ -60,18 +88,26 @@ class EnglishAuctionEnv(gym.Env):
         self.objects = [self.BiddingObject(i) for i in range(self.num_objects)]
         self.current_object = self.objects[0]
 
-        # keep track of current spending of each agent to enforce budget limit
-        self.agent_spending = np.zeros(self.num_agents)
+        self.bid_history_size = 5
 
-        # the observation space will be the current object being auctioned
-        self.observation_space = spaces.Dict(
-            {
-                "object_id": spaces.Discrete(self.num_objects),
-                "stats": spaces.Box(low=0, high=1, shape=(3,), dtype=np.float32),
-                "current_bid": spaces.Discrete(self.budget_limit),
-                "current_bidder_id": spaces.Discrete(self.num_agents),
-            }
-        )
+        # initialize agents
+        self.agents = [self.Bidder(i, self.budget_limit) for i in range(self.num_agents)]
+        
+        # The observations would be the following features:
+        # 1. One-hot encoded current object (env.num_objects)
+        # 2. All object stats (3 * env.num_objects)
+        # 3. Current bidding price (1)
+        # 4. Bid increment (1)
+        # 5. Number of no bid rounds right now (1)
+        # 6. Flattened action history (env.num_agents * env.bid_history_size)
+        self.observation_space = spaces.Dict({
+            "object_id": spaces.Discrete(self.num_objects),
+            "stats": spaces.Box(low=0, high=1, shape=(3 * self.num_objects,)),
+            "current_bid": spaces.Box(low=0, high=np.inf, shape=(1,)),
+            "bid_increment": spaces.Box(low=0, high=np.inf, shape=(1,)),
+            "no_bid_rounds": spaces.Discrete(self.no_bid_rounds),
+            "action_history": spaces.Box(low=0, high=1, shape=(self.num_agents * self.bid_history_size,))
+        })
 
         # At each time step, each agent can either bid or pass. 
         # Action space will be a vector of size num_agents with each element representing the action of an agent
@@ -81,6 +117,11 @@ class EnglishAuctionEnv(gym.Env):
         # rewards buffer that is updated at each step
         self.rewards = np.zeros(self.num_agents)
 
+        # action history queue
+        self.action_history = np.zeros((self.num_agents, self.bid_history_size)) -1
+        
+
+
     def __get_observation(self):
         """
         Returns the current observation of the environment.
@@ -88,38 +129,55 @@ class EnglishAuctionEnv(gym.Env):
         Returns:
             dict: The observation of the environment.
         """
+        # One-hot encode the current object
+        object_id = np.zeros(self.num_objects)
+        object_id[self.current_object.id] = 1
+
+        # Flatten the stats of all objects
+        stats = np.concatenate([obj.stats for obj in self.objects])
+
+        # Get the current bid
+        current_bid = np.array([self.current_object.current_bid if self.current_object.current_bid else 0])
+
+        # Get the bid increment
+        bid_increment = np.array([self.bid_increment])
+
+        # Get the number of no bid rounds
+        no_bid_rounds = np.array([self.no_bid_counter])
+
+        # Get the action history
+        action_history = self.action_history.flatten()
+
         return {
-            "object_id": self.current_object.id,
-            "stats": self.current_object.stats,
-            "current_bid": self.current_object.current_bid,
-            "current_bidder_id": self.current_object.current_bidder_id,
+            "object_id": object_id,
+            "stats": stats,
+            "current_bid": current_bid,
+            "bid_increment": bid_increment,
+            "no_bid_rounds": no_bid_rounds,
+            "action_history": action_history,
         }
     
     def __get_info(self):
         """
-        Returns the auction properties
+        Returns the agent preferences, the object winners so far and their remaining budgets.
 
         Returns:
             dict: The auction properties
         """
         return {
-            "num_agents": self.num_agents,
-            "bid_increment": self.bid_increment,
-            "budget_limit": self.budget_limit,
-            "num_objects": self.num_objects,
-            "no_bid_rounds": self.no_bid_rounds,
+            "agent_prefs": [agent.prefs for agent in self.agents],
+            "agent_objects_won": [agent.won_objects for agent in self.agents],
+            "remaining_budgets": [agent.budget - agent.spending for agent in self.agents],
         }
 
-    def reset(self, *, seed: int | None = None, options: None):
+    def reset(self, *, seed = None, options: None = None):
         super().reset(seed=seed, options=options)
-        # reset agent spending
-        self.agent_spending = np.zeros(self.num_agents)
+        # reset agents
+        for agent in self.agents:
+            agent.reset()
         # reset object stats
         for obj in self.objects:
-            obj.stats = np.random.rand(3)
-            obj.current_bid = None
-            obj.current_bidder_id = None
-            obj.sold = False
+            obj.reset()
         # reset current object
         self.current_object = self.objects[0]
         return self.__get_observation(), self.__get_info()
@@ -129,26 +187,41 @@ class EnglishAuctionEnv(gym.Env):
         # 0 - pass, 1 - bid
         terminated = False
         self.rewards = np.zeros(self.num_agents)
+
+        # add action to action history
+        self.action_history = np.roll(self.action_history, 1, axis=1)
+        self.action_history[:, 0] = action
         
-        bid = False
+        bidders = []
         # if even a single agent bids, the current bid is incremented by bid_increment
         for i, bid in enumerate(action):
             if bid == 1:
-                self.current_object.current_bid += self.bid_increment
-                self.current_object.current_bidder_id = i
-                bid = True
-        
-        # if no agent bids, the no_bid_counter is incremented
-        if not bid:
+                if self.agents[i].budget - self.agents[i].spending >= self.current_object.current_bid + self.bid_increment:
+                    bidders.append(i)
+                else:
+                    print(f"Agent {i} does not have enough budget to bid.")
+                    # reward penalize the agent for trying to bid without enough budget
+                    self.rewards[i] = -5
+
+        if bidders:
+            chosen_bidder = np.random.choice(bidders)
+            if len(bidders) > 1:
+                print(f"Picked bidder {chosen_bidder} randomly from {bidders}")
+            self.current_object.current_bid += self.bid_increment
+            self.current_object.current_bidder_id = chosen_bidder
+        else:
             self.no_bid_counter += 1
-        
         
         # if no_bid_counter exceeds no_bid_rounds, the object is considered sold to the current_bidder
         if self.no_bid_counter >= self.no_bid_rounds:
             # if there is no current_bidder, the object remains unsold
             if self.current_object.current_bidder_id is not None:
                 self.current_object.sold = True
-                self.agent_spending[self.current_object.current_bidder_id] += self.current_object.current_bid
+                self.agents[self.current_object.current_bidder_id].spending += self.current_object.current_bid
+                self.agents[self.current_object.current_bidder_id].won_objects.append(self.current_object.id)
+                # reward the agent for winning the object
+                self.rewards[self.current_object.current_bidder_id] = 1
+                
                 # here rewards are only an indication of winning. We will have a reward transformation in the agent class to make it more meaningful
                 self.rewards[self.current_object.current_bidder_id] = 1
                 # indicate that other agents did not win
@@ -158,9 +231,13 @@ class EnglishAuctionEnv(gym.Env):
             self.no_bid_counter = 0
             # move to the next object
             if self.current_object.id == self.num_objects - 1:
-                # conclude the auction
+                # all objects done, conclude the auction
                 terminated = True
             else:
                 self.current_object = self.objects[(self.current_object.id + 1) % self.num_objects]
         
+        # we can terminate if all the agents have exhausted their budgets
+        if all([agent.budget - agent.spending <= 0 for agent in self.agents]):
+            terminated = True
+
         return self.__get_observation(), self.rewards, terminated, False, self.__get_info()
