@@ -192,7 +192,7 @@ class EnglishAuctionEnv(gym.Env):
 
         # add action to action history
         self.action_history = np.roll(self.action_history, 1, axis=1)
-        self.action_history[:, 0] = action
+        self.action_history[:, 0] = action.cpu()
         
         bidders = []
         # if even a single agent bids, the current bid is incremented by bid_increment

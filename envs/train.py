@@ -221,7 +221,7 @@ def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_wi
     plt.title("Average Episode Cumulative Reward")
     plt.xlabel('Episode')
     plt.ylabel('Average Cumulative Reward')
-    plt.plot(moving_average_cumulative_reward.numpy())
+    plt.plot(moving_average_cumulative_reward.cpu().numpy())
     if show_result:
         plt.show()
 
