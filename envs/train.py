@@ -206,14 +206,14 @@ def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_wi
     # Plotting Average Reward per Episode: Sum of rewards obtained by an agent within an episode, averaged over a window of episodes
     # cumulative_reward_per_episode: shape (num_episodes, num_agents) containing the cumulative reward obtained by each agent in each episode
     # plot one line for the average cumulative reward showing the average reward obtained by all agents over a window of episodes
-    average_cumulative_reward_per_episode = torch.mean(torch.stack(cumulative_reward_per_episode), dim=1)
+    average_cumulative_reward_per_episode = torch.mean(torch.stack(cumulative_reward_per_episode), dim=1).to(device)
     if len(average_cumulative_reward_per_episode) >= reward_tracking_window:
-        moving_average_cumulative_reward = average_cumulative_reward_per_episode.unfold(0, reward_tracking_window, 1).mean(1).view(-1)
-        moving_average_cumulative_reward = torch.cat((torch.zeros(reward_tracking_window-1), moving_average_cumulative_reward))
+        moving_average_cumulative_reward = average_cumulative_reward_per_episode.unfold(0, reward_tracking_window, 1).mean(1).view(-1).to(device)
+        moving_average_cumulative_reward = torch.cat((torch.zeros(reward_tracking_window-1, device=device), moving_average_cumulative_reward))
     elif len(average_cumulative_reward_per_episode) > 0:
-        moving_average_cumulative_reward = torch.full((len(average_cumulative_reward_per_episode),), average_cumulative_reward_per_episode.mean())
+        moving_average_cumulative_reward = torch.full((len(average_cumulative_reward_per_episode),), average_cumulative_reward_per_episode.mean(), device=device)
     else:
-        moving_average_cumulative_reward = torch.tensor([])
+        moving_average_cumulative_reward = torch.tensor([], device=device)
     plt.figure(2)
     if not show_result:
         plt.clf()
@@ -258,9 +258,9 @@ for i_episode in range(num_episodes):
     for t in count():
         action = select_action(state)
         observation, reward, terminated, truncated, _ = env.step(action)
-        
+        reward = torch.tensor(reward, device=device)
         cumulative_reward += reward
-        reward = torch.tensor([reward], device=device)
+        reward = reward.unsqueeze(0)
         done = terminated or truncated
 
         if terminated:
