@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple, deque
 from english_auction_env import EnglishAuctionEnv
 
-env = EnglishAuctionEnv(num_agents=2, num_objects=3, no_bid_rounds=3, budget_limit=10)
+env = EnglishAuctionEnv(num_agents=6, num_objects=8, no_bid_rounds=3, budget_limit=15)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -93,7 +93,7 @@ def build_input_from_obs_info(obs, info):
         all_object_stats = torch.tensor([obs['stats']], dtype=torch.float32, device=device)
         agent_budget = torch.tensor([[info['remaining_budgets'][i]]], dtype=torch.float32, device=device)
         current_bidding_price = torch.tensor([obs['current_bid']], dtype=torch.float32, device=device)
-        is_current_agent_highest_bidder = torch.tensor([obs['current_bid'] == info['remaining_budgets'][i]], dtype=torch.float32, device=device)
+        is_current_agent_highest_bidder = torch.tensor([[1.0 if env.current_object.current_bidder_id==i else 0.0]], dtype=torch.float32, device=device)
         bid_increment = torch.tensor([obs['bid_increment']], dtype=torch.float32, device=device)
         number_of_no_bid_rounds = torch.tensor([obs['no_bid_rounds']], dtype=torch.float32, device=device)
         flattened_action_history = torch.tensor([obs['action_history']], dtype=torch.float32, device=device)
@@ -184,7 +184,7 @@ def optimize_model():
 
 episode_durations = []
 
-def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode, show_result=False):
+def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode, save_path = ".", show_result=False, silent = False):
     plt.figure(1)
     durations_t = torch.tensor(episode_durations, dtype=torch.float)
     if not show_result:
@@ -195,36 +195,36 @@ def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_wi
     plt.ylabel('Duration')
     plt.plot(durations_t.numpy())
     # Take 100 episode averages and plot them too
-    if len(durations_t) >= 100:
-        means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-        means = torch.cat((torch.zeros(99), means))
+    if len(durations_t) >= 20:
+        means = durations_t.unfold(0, 20, 1).mean(1).view(-1)
+        means = torch.cat((torch.zeros(19), means))
         plt.plot(means.numpy())
     
     if show_result:
+        plt.savefig(f"{save_path}/auction_length.png")
         plt.show()
 
     # Plotting Average Reward per Episode: Sum of rewards obtained by an agent within an episode, averaged over a window of episodes
     # cumulative_reward_per_episode: shape (num_episodes, num_agents) containing the cumulative reward obtained by each agent in each episode
     # plot one line for the average cumulative reward showing the average reward obtained by all agents over a window of episodes
     average_cumulative_reward_per_episode = torch.mean(torch.stack(cumulative_reward_per_episode), dim=1).to(device)
-    if len(average_cumulative_reward_per_episode) >= reward_tracking_window:
-        moving_average_cumulative_reward = average_cumulative_reward_per_episode.unfold(0, reward_tracking_window, 1).mean(1).view(-1).to(device)
-        moving_average_cumulative_reward = torch.cat((torch.zeros(reward_tracking_window-1, device=device), moving_average_cumulative_reward))
-    elif len(average_cumulative_reward_per_episode) > 0:
-        moving_average_cumulative_reward = torch.full((len(average_cumulative_reward_per_episode),), average_cumulative_reward_per_episode.mean(), device=device)
-    else:
-        moving_average_cumulative_reward = torch.tensor([], device=device)
     plt.figure(2)
     if not show_result:
         plt.clf()
-    
     plt.title("Average Episode Cumulative Reward")
     plt.xlabel('Episode')
     plt.ylabel('Average Cumulative Reward')
-    plt.plot(moving_average_cumulative_reward.numpy())
+    plt.plot(average_cumulative_reward_per_episode.cpu().numpy())
+    # Take reward_tracking_window episode averages and plot them too
+    if len(average_cumulative_reward_per_episode) >= reward_tracking_window:
+        means = average_cumulative_reward_per_episode.unfold(0, reward_tracking_window, 1).mean(1).view(-1)
+        means = torch.cat((torch.zeros(reward_tracking_window-1, device=device), means))
+        plt.plot(means.cpu().numpy())
+        
     if show_result:
+        plt.savefig(f"{save_path}/average_reward.png")
         plt.show()
-
+    
     # we plot the average winning bid per episode
     plt.figure(3)
     if not show_result:
@@ -233,14 +233,19 @@ def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_wi
     plt.xlabel('Episode')
     plt.ylabel('Average Winning Bid')
     plt.plot(average_winning_bid_per_episode)
+    if len(average_winning_bid_per_episode) >= reward_tracking_window:
+        means = torch.tensor(average_winning_bid_per_episode, dtype=torch.float32, device=device).unfold(0, reward_tracking_window, 1).mean(1).view(-1)
+        means = torch.cat((torch.zeros(reward_tracking_window-1, device=device), means))
+        plt.plot(means.cpu().numpy())
     if show_result:
+        plt.savefig(f"{save_path}/average_winning_bid.png")
         plt.show()
 
     plt.pause(0.001)  # pause a bit so that plots are updated
 
 if torch.cuda.is_available():
-    num_episodes = 2000
-    reward_tracking_window = 10
+    num_episodes = 300
+    reward_tracking_window = 25
 else:
     num_episodes = 100
     reward_tracking_window = 2
@@ -296,4 +301,6 @@ for i_episode in range(num_episodes):
             break
 
 plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode, show_result=True)
+# num_agents=6, num_objects=3, no_bid_rounds=3, budget_limit=10
+torch.save(policy_net.state_dict(), f"policy_net_{env.num_agents}agents_{env.num_objects}obj_{env.no_bid_rounds}nbr_{env.budget_limit}budget.pth")
 print('Complete')

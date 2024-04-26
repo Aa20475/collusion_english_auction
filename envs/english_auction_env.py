@@ -78,6 +78,8 @@ class EnglishAuctionEnv(gym.Env):
         """
         super().__init__()
 
+        self.demo = False
+
         # auction parameters
         self.num_agents = num_agents
         self.bid_increment = bid_increments
@@ -190,6 +192,18 @@ class EnglishAuctionEnv(gym.Env):
         terminated = False
         self.rewards = np.zeros(self.num_agents)
 
+        if self.demo:
+            # print out auction state and bidding action
+            print("+-----------------------------------+")
+            print(f"Current object: {self.current_object.id}")
+            print(f"Current bid: {self.current_object.current_bid}")
+            print(f"Current bidder: {self.current_object.current_bidder_id}")
+            print(f"Current object stats: {self.current_object.stats}")
+            print(f"Current object sold: {self.current_object.sold}")
+            
+            for i, agent in enumerate(self.agents):
+                print(f"Agent {i} budget: {agent.budget}, spending: {agent.spending}, prefs: {agent.prefs}, alignment: {np.dot(agent.prefs, self.current_object.stats)}, bid: {action[i]}")
+
         # add action to action history
         self.action_history = np.roll(self.action_history, 1, axis=1)
         self.action_history[:, 0] = action
@@ -201,14 +215,16 @@ class EnglishAuctionEnv(gym.Env):
                 if self.agents[i].budget - self.agents[i].spending >= self.current_object.current_bid + self.bid_increment:
                     bidders.append(i)
                 else:
-                    print(f"Agent {i} does not have enough budget to bid.")
+                    if not self.demo:
+                        print(f"Agent {i} does not have enough budget to bid.")
                     # reward penalize the agent for trying to bid without enough budget
                     self.rewards[i] = -5
 
         if bidders:
             chosen_bidder = np.random.choice(bidders)
             if len(bidders) > 1:
-                print(f"Picked bidder {chosen_bidder} randomly from {bidders}")
+                if not self.demo:
+                    print(f"Picked bidder {chosen_bidder} randomly from {bidders}")
             self.current_object.current_bid += self.bid_increment
             self.current_object.current_bidder_id = chosen_bidder
         else:
