@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple, deque
 from english_auction_env import EnglishAuctionEnv
 
-env = EnglishAuctionEnv(num_agents=5, num_objects=3,no_bid_rounds=10)
+env = EnglishAuctionEnv(num_agents=2, num_objects=3,no_bid_rounds=3)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -109,7 +109,6 @@ def build_input_from_obs_info(obs, info):
 
     return input_tensors
 
-
 policy_net = DQN(n_observations, n_actions).to(device)
 target_net = DQN(n_observations, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
@@ -185,8 +184,7 @@ def optimize_model():
 
 episode_durations = []
 
-
-def plot_durations(show_result=False):
+def plot_stats(cumulative_reward_per_episode, reward_tracking_window, show_result=False):
     plt.figure(1)
     durations_t = torch.tensor(episode_durations, dtype=torch.float)
     if show_result:
@@ -203,21 +201,46 @@ def plot_durations(show_result=False):
         means = torch.cat((torch.zeros(99), means))
         plt.plot(means.numpy())
 
+    # Plotting Average Reward per Episode: Sum of rewards obtained by an agent within an episode, averaged over a window of episodes
+    # cumulative_reward_per_episode: shape (num_episodes, num_agents) containing the cumulative reward obtained by each agent in each episode
+    # plot one line per agent showing the average reward obtained by that agent over a window of episodes
+    plt.figure(2)
+    plt.clf()
+    plt.title('Average Reward per Episode')
+    plt.xlabel('Episode')
+    plt.ylabel('Average Reward')
+    for i in range(env.num_agents):
+        cumulative_reward_per_agent = torch.tensor([cumulative_reward[i] for cumulative_reward in cumulative_reward_per_episode])
+        if len(cumulative_reward_per_agent) >= reward_tracking_window:
+            average_reward_per_episode = cumulative_reward_per_agent.unfold(0, reward_tracking_window, 1).mean(1).view(-1)
+        else:
+            average_reward_per_episode = cumulative_reward_per_agent.mean().view(-1)
+        plt.plot(average_reward_per_episode.numpy(), label=f'Agent {i+1}')
+    plt.legend()
+
     plt.pause(0.001)  # pause a bit so that plots are updated
 
 if torch.cuda.is_available():
-    num_episodes = 600
+    num_episodes = 2000
+    reward_tracking_window = 10
 else:
-    num_episodes = 50
+    num_episodes = 100
+    reward_tracking_window = 2
 
+
+cumulative_reward_per_episode = []
 for i_episode in range(num_episodes):
     # Initialize the environment and get its state
     obs, info = env.reset()
     state = build_input_from_obs_info(obs, info)
+
+    # Initialize the cumulative reward for the episode
+    cumulative_reward = torch.zeros(env.num_agents, device=device)
     for t in count():
         action = select_action(state)
         observation, reward, terminated, truncated, _ = env.step(action)
         
+        cumulative_reward += reward
         reward = torch.tensor([reward], device=device)
         done = terminated or truncated
 
@@ -245,7 +268,8 @@ for i_episode in range(num_episodes):
 
         if done:
             episode_durations.append(t + 1)
-            plot_durations()
+            cumulative_reward_per_episode.append(cumulative_reward)
+            plot_stats(cumulative_reward_per_episode, reward_tracking_window)
             break
 
 print('Complete')

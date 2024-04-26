@@ -17,6 +17,7 @@ class EnglishAuctionEnv(gym.Env):
         def __init__(self, id : int) -> None:
             self.id = id
             self.stats = np.random.rand(3)
+            self.stats /= np.linalg.norm(self.stats)
             self.current_bid = 0
             self.current_bidder_id = None
             self.sold = False
@@ -26,6 +27,7 @@ class EnglishAuctionEnv(gym.Env):
             self.current_bidder_id = None
             self.sold = False
             self.stats = np.random.rand(3)
+            self.stats /= np.linalg.norm(self.stats)
 
     class Bidder:
         """
@@ -43,12 +45,14 @@ class EnglishAuctionEnv(gym.Env):
             self.value_won_so_far = 0
             # weights for the stats of the object
             self.prefs = np.random.rand(3)
+            self.prefs /= np.linalg.norm(self.prefs)
 
         def reset(self):
             self.spending = 0
             self.won_objects = []
             self.value_won_so_far = 0
             self.prefs = np.random.rand(3)
+            self.prefs /= np.linalg.norm(self.prefs)
 
     def __init__(
         self,
@@ -119,8 +123,6 @@ class EnglishAuctionEnv(gym.Env):
 
         # action history queue
         self.action_history = np.zeros((self.num_agents, self.bid_history_size)) -1
-        
-
 
     def __get_observation(self):
         """
@@ -219,8 +221,8 @@ class EnglishAuctionEnv(gym.Env):
                 self.current_object.sold = True
                 self.agents[self.current_object.current_bidder_id].spending += self.current_object.current_bid
                 self.agents[self.current_object.current_bidder_id].won_objects.append(self.current_object.id)
-                # reward the agent for winning the object
-                self.rewards[self.current_object.current_bidder_id] = 1
+                # reward the agent for winning the object (dot product of agent prefs and object stats)
+                self.rewards[self.current_object.current_bidder_id] = np.dot(self.agents[self.current_object.current_bidder_id].prefs, self.current_object.stats)
                 
                 # here rewards are only an indication of winning. We will have a reward transformation in the agent class to make it more meaningful
                 self.rewards[self.current_object.current_bidder_id] = 1
