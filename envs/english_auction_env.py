@@ -226,10 +226,10 @@ class EnglishAuctionEnv(gym.Env):
                 
                 # here rewards are only an indication of winning. We will have a reward transformation in the agent class to make it more meaningful
                 self.rewards[self.current_object.current_bidder_id] = 1
-                # indicate that other agents did not win
-                for i in range(self.num_agents):
-                    if i != self.current_object.current_bidder_id:
-                        self.rewards[i] = -1
+                # indicate that other agents did not win TODO: Not doing this for now for plotting purposes
+                # for i in range(self.num_agents):
+                #     if i != self.current_object.current_bidder_id:
+                #         self.rewards[i] = -1
             self.no_bid_counter = 0
             # move to the next object
             if self.current_object.id == self.num_objects - 1:

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple, deque
 from english_auction_env import EnglishAuctionEnv
 
-env = EnglishAuctionEnv(num_agents=2, num_objects=3,no_bid_rounds=3)
+env = EnglishAuctionEnv(num_agents=2, num_objects=3, no_bid_rounds=3, budget_limit=10)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -184,14 +184,13 @@ def optimize_model():
 
 episode_durations = []
 
-def plot_stats(cumulative_reward_per_episode, reward_tracking_window, show_result=False):
+def plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode, show_result=False):
     plt.figure(1)
     durations_t = torch.tensor(episode_durations, dtype=torch.float)
-    if show_result:
-        plt.title('Result')
-    else:
+    if not show_result:
         plt.clf()
-        plt.title('Training...')
+    
+    plt.title("Auction Length")
     plt.xlabel('Episode')
     plt.ylabel('Duration')
     plt.plot(durations_t.numpy())
@@ -200,23 +199,42 @@ def plot_stats(cumulative_reward_per_episode, reward_tracking_window, show_resul
         means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
         means = torch.cat((torch.zeros(99), means))
         plt.plot(means.numpy())
+    
+    if show_result:
+        plt.show()
 
     # Plotting Average Reward per Episode: Sum of rewards obtained by an agent within an episode, averaged over a window of episodes
     # cumulative_reward_per_episode: shape (num_episodes, num_agents) containing the cumulative reward obtained by each agent in each episode
-    # plot one line per agent showing the average reward obtained by that agent over a window of episodes
+    # plot one line for the average cumulative reward showing the average reward obtained by all agents over a window of episodes
+    average_cumulative_reward_per_episode = torch.mean(torch.stack(cumulative_reward_per_episode), dim=1)
+    if len(average_cumulative_reward_per_episode) >= reward_tracking_window:
+        moving_average_cumulative_reward = average_cumulative_reward_per_episode.unfold(0, reward_tracking_window, 1).mean(1).view(-1)
+        moving_average_cumulative_reward = torch.cat((torch.zeros(reward_tracking_window-1), moving_average_cumulative_reward))
+    elif len(average_cumulative_reward_per_episode) > 0:
+        moving_average_cumulative_reward = torch.full((len(average_cumulative_reward_per_episode),), average_cumulative_reward_per_episode.mean())
+    else:
+        moving_average_cumulative_reward = torch.tensor([])
     plt.figure(2)
-    plt.clf()
-    plt.title('Average Reward per Episode')
+    if not show_result:
+        plt.clf()
+    
+    plt.title("Average Episode Cumulative Reward")
     plt.xlabel('Episode')
-    plt.ylabel('Average Reward')
-    for i in range(env.num_agents):
-        cumulative_reward_per_agent = torch.tensor([cumulative_reward[i] for cumulative_reward in cumulative_reward_per_episode])
-        if len(cumulative_reward_per_agent) >= reward_tracking_window:
-            average_reward_per_episode = cumulative_reward_per_agent.unfold(0, reward_tracking_window, 1).mean(1).view(-1)
-        else:
-            average_reward_per_episode = cumulative_reward_per_agent.mean().view(-1)
-        plt.plot(average_reward_per_episode.numpy(), label=f'Agent {i+1}')
-    plt.legend()
+    plt.ylabel('Average Cumulative Reward')
+    plt.plot(moving_average_cumulative_reward.numpy())
+    if show_result:
+        plt.show()
+
+    # we plot the average winning bid per episode
+    plt.figure(3)
+    if not show_result:
+        plt.clf()
+    plt.title("Average Winning Bid")
+    plt.xlabel('Episode')
+    plt.ylabel('Average Winning Bid')
+    plt.plot(average_winning_bid_per_episode)
+    if show_result:
+        plt.show()
 
     plt.pause(0.001)  # pause a bit so that plots are updated
 
@@ -229,6 +247,7 @@ else:
 
 
 cumulative_reward_per_episode = []
+average_winning_bid_per_episode = []
 for i_episode in range(num_episodes):
     # Initialize the environment and get its state
     obs, info = env.reset()
@@ -269,7 +288,12 @@ for i_episode in range(num_episodes):
         if done:
             episode_durations.append(t + 1)
             cumulative_reward_per_episode.append(cumulative_reward)
-            plot_stats(cumulative_reward_per_episode, reward_tracking_window)
+            # compute average winning bid from the current_bid of each object
+            average_winning_bid = sum([obs.current_bid for obs in env.objects])/env.num_objects
+            average_winning_bid_per_episode.append(average_winning_bid)
+
+            plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode)
             break
 
+plot_stats(cumulative_reward_per_episode, reward_tracking_window, average_winning_bid_per_episode, show_result=True)
 print('Complete')
